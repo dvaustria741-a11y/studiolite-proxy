@@ -44,7 +44,7 @@ app.post("/fetch-user-places", async (req, res) => {
         // Public API — no key needed
         const gamesUrl =
             `https://games.roblox.com/v2/users/${userId}/games` +
-            `?limit=50&sortOrder=Asc&accessFilter=2`;
+            `?limit=50&sortOrder=Asc&accessFilter=All`;
 
         const gamesResp = await fetch(gamesUrl, {
             method:  "GET",
