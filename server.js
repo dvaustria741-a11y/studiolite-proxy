@@ -57,7 +57,8 @@ function httpsPostXml(urlStr, apiKey, bodyBuffer) {
             method:   "POST",
             headers:  {
                 "x-api-key":      apiKey,
-                "Content-Type":   "application/xml",
+                // FIX: Roblox strictly requires octet-stream for Place Publishing, even for XML files!
+                "Content-Type":   "application/octet-stream",
                 // Explicit, exact byte length — NOT "chunked", NOT omitted.
                 // Roblox Open Cloud validates this header server-side and returns
                 // 400 "Invalid Content stream" if it is absent or mismatched.
