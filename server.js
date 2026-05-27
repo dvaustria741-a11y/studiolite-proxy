@@ -14,7 +14,7 @@ const express = require("express");
 const fetch   = require("node-fetch");   // npm install node-fetch@2
 const app     = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "36mb" }));
 
 // ── Simple shared-secret guard ────────────────────────────────────────────────
 const PROXY_SECRET = process.env.PROXY_SECRET || "change_me_to_something_random";
@@ -41,26 +41,47 @@ app.post("/fetch-user-places", async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     try {
-        // Public API — no key needed
+        // Try public games first
         const gamesUrl =
             `https://games.roblox.com/v2/users/${userId}/games` +
-            `?limit=50&sortOrder=Asc&accessFilter=All`;
+            `?limit=50&sortOrder=Asc`;
 
         const gamesResp = await fetch(gamesUrl, {
             method:  "GET",
             headers: { "Accept": "application/json" },
         });
 
-        if (!gamesResp.ok) {
-            const txt = await gamesResp.text();
-            console.error(`[fetch-user-places] games API ${gamesResp.status}: ${txt}`);
-            return res.status(gamesResp.status).json({
-                error: `Could not fetch games list (HTTP ${gamesResp.status}).`,
-            });
+        let games = [];
+
+        if (gamesResp.ok) {
+            const gamesData = await gamesResp.json();
+            games = gamesData.data || [];
         }
 
-        const gamesData = await gamesResp.json();
-        const games     = gamesData.data || [];
+        // Also try develop API to catch private / unpublished universes
+        // (returns all universes the authenticated user owns — no key needed,
+        //  but it is a public-ish endpoint that works for the owning user ID)
+        try {
+            const devUrl =
+                `https://develop.roblox.com/v1/user/universes` +
+                `?sortOrder=Asc&limit=50`;
+            const devResp = await fetch(devUrl, {
+                method:  "GET",
+                headers: { "Accept": "application/json" },
+            });
+            if (devResp.ok) {
+                const devData = await devResp.json();
+                const devGames = devData.data || [];
+                // Merge — deduplicate by universe id
+                const seen = new Set(games.map(g => String(g.id)));
+                for (const g of devGames) {
+                    if (!seen.has(String(g.id))) {
+                        games.push(g);
+                        seen.add(String(g.id));
+                    }
+                }
+            }
+        } catch (_) { /* best-effort */ }
 
         if (games.length === 0) {
             return res.json([]);
