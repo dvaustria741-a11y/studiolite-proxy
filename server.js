@@ -14,7 +14,7 @@ const express = require("express");
 const fetch   = require("node-fetch");   // npm install node-fetch@2
 const app     = express();
 
-app.use(express.json({ limit: "40mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 // ── Simple shared-secret guard ────────────────────────────────────────────────
 const PROXY_SECRET = process.env.PROXY_SECRET || "change_me_to_something_random";
@@ -120,13 +120,15 @@ app.post("/publish", async (req, res) => {
 
     const url = `https://apis.roblox.com/universes/v1/${universeId}/places/${placeId}/versions?versionType=Published`;
     try {
+        const bodyBuffer = Buffer.from(rbxlx, "utf8");
         const r = await fetch(url, {
             method:  "POST",
             headers: {
-                "x-api-key":    apiKey,
-                "Content-Type": "application/xml",
+                "x-api-key":      apiKey,
+                "Content-Type":   "application/octet-stream",
+                "Content-Length": String(bodyBuffer.length),
             },
-            body: rbxlx,
+            body: bodyBuffer,
         });
         const text = await r.text();
         res.status(r.status).set("Content-Type", "application/json").send(text);
