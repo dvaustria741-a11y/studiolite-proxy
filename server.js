@@ -14,7 +14,7 @@ const express = require("express");
 const fetch   = require("node-fetch");   // npm install node-fetch@2
 const app     = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "40mb" }));
 
 // ── Simple shared-secret guard ────────────────────────────────────────────────
 const PROXY_SECRET = process.env.PROXY_SECRET || "change_me_to_something_random";
