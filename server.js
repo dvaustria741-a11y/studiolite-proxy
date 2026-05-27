@@ -29,26 +29,19 @@ function checkSecret(req, res) {
 }
 
 // ── POST /fetch-user-places ───────────────────────────────────────────────────
-// Body: { apiKey, userId, proxySecret }
+// Body: { userId, proxySecret }   ← NO apiKey needed for listing
 //
-// Flow:
-//   1. Call games.roblox.com to list the user's games (public API, no key needed).
-//   2. For each game (up to MAX_GAMES), call Open Cloud to list its places.
-//   3. Return a flat array of { name, placeId, universeId }.
-//
-// The "name" is formatted as  "<GameName> — <PlaceName>"  so the dropdown is
-// readable when a game has several places.
+// Uses the public games.roblox.com API which already returns rootPlaceId for
+// every game — no Open Cloud key required.  Returns a flat array of
+// { name, placeId, universeId }.
 app.post("/fetch-user-places", async (req, res) => {
     if (!checkSecret(req, res)) return;
 
-    const { apiKey, userId } = req.body;
-    if (!apiKey)  return res.status(400).json({ error: "apiKey is required" });
-    if (!userId)  return res.status(400).json({ error: "userId is required" });
-
-    const MAX_GAMES = 10;   // cap so we don't hammer the API
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
 
     try {
-        // ── Step 1: fetch the user's games (public, no API key) ───────────────
+        // Public API — no key needed
         const gamesUrl =
             `https://games.roblox.com/v2/users/${userId}/games` +
             `?limit=50&sortOrder=Asc&accessFilter=2`;
@@ -62,78 +55,26 @@ app.post("/fetch-user-places", async (req, res) => {
             const txt = await gamesResp.text();
             console.error(`[fetch-user-places] games API ${gamesResp.status}: ${txt}`);
             return res.status(gamesResp.status).json({
-                error: `Could not fetch games list (HTTP ${gamesResp.status}). Check your userId.`,
+                error: `Could not fetch games list (HTTP ${gamesResp.status}).`,
             });
         }
 
         const gamesData = await gamesResp.json();
-        const games     = (gamesData.data || []).slice(0, MAX_GAMES);
+        const games     = gamesData.data || [];
 
         if (games.length === 0) {
-            return res.json([]);   // no games → empty list
+            return res.json([]);
         }
 
-        // ── Step 2: for each game, fetch its places via Open Cloud ────────────
-        const results = [];
+        // Each game already has rootPlaceId — use it directly, no extra API call
+        const results = games
+            .filter(g => g.rootPlaceId)
+            .map(g => ({
+                name:       g.name || `Universe ${g.id}`,
+                placeId:    String(g.rootPlaceId),
+                universeId: String(g.id),
+            }));
 
-        await Promise.all(games.map(async (game) => {
-            // games.roblox.com returns  { id: universeId, rootPlaceId, name, … }
-            const universeId = String(game.id);
-            const gameName   = game.name || `Universe ${universeId}`;
-
-            try {
-                const placesUrl =
-                    `https://apis.roblox.com/cloud/v2/universes/${universeId}/places?maxPageSize=50`;
-
-                const placesResp = await fetch(placesUrl, {
-                    method:  "GET",
-                    headers: {
-                        "x-api-key": apiKey,
-                        "Accept":    "application/json",
-                    },
-                });
-
-                if (!placesResp.ok) {
-                    // Silently skip games the API key can't access (e.g. wrong scope)
-                    console.warn(
-                        `[fetch-user-places] universe ${universeId} → HTTP ${placesResp.status}`
-                    );
-                    return;
-                }
-
-                const placesData = await placesResp.json();
-                const raw        = placesData.places || placesData.resources || [];
-
-                for (const pl of raw) {
-                    // Cloud v2 path: "universes/NNN/places/MMM"
-                    let placeId = pl.placeId || pl.id;
-                    if (!placeId && typeof pl.path === "string") {
-                        const m = pl.path.match(/\/places\/(\d+)$/);
-                        if (m) placeId = m[1];
-                    }
-                    if (!placeId) continue;
-
-                    const placeName = pl.displayName || pl.name || `Place ${placeId}`;
-
-                    // If the game only has one place, just show the game name.
-                    // If it has multiple, show "GameName — PlaceName".
-                    const displayName =
-                        raw.length === 1
-                            ? gameName
-                            : `${gameName} — ${placeName}`;
-
-                    results.push({
-                        name:       displayName,
-                        placeId:    String(placeId),
-                        universeId: universeId,
-                    });
-                }
-            } catch (innerErr) {
-                console.error(`[fetch-user-places] inner error for universe ${universeId}:`, innerErr);
-            }
-        }));
-
-        // Sort alphabetically so the dropdown is easy to read
         results.sort((a, b) => a.name.localeCompare(b.name));
 
         console.log(`[fetch-user-places] returning ${results.length} place(s) for user ${userId}`);
