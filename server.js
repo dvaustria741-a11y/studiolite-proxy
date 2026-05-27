@@ -209,23 +209,43 @@ app.post("/publish", async (req, res) => {
     if (!apiKey || !universeId || !placeId || !rbxlx)
         return res.status(400).json({ error: "apiKey, universeId, placeId, rbxlx are required" });
 
+    // Sanity-check the payload looks like XML before hitting Open Cloud.
+    // Catches cases where JSONEncode/Decode corrupted the string en route.
+    if (!rbxlx.startsWith("<?xml") && !rbxlx.startsWith("<roblox")) {
+        console.error("[publish] Payload does not look like XML — first 120 chars:", rbxlx.slice(0, 120));
+        return res.status(400).json({
+            error: "rbxlx field does not look like valid XML. Check Lua serializer output."
+        });
+    }
+
     const url = `https://apis.roblox.com/universes/v1/${universeId}/places/${placeId}/versions?versionType=Published`;
     try {
+        // Convert to Buffer once — node-fetch v2 derives Content-Length automatically
+        // from a Buffer body. Setting Content-Length manually causes node-fetch to
+        // emit the header TWICE in some patch versions, which Open Cloud rejects.
+        // IMPORTANT: Content-Type MUST be application/xml for .rbxlx files.
+        // application/octet-stream causes "Invalid Content stream" 400 errors.
         const bodyBuffer = Buffer.from(rbxlx, "utf8");
+
+        console.log(`[publish] Sending ${bodyBuffer.length} bytes → universe ${universeId} / place ${placeId}`);
+
         const r = await fetch(url, {
             method:  "POST",
             headers: {
-                "x-api-key": apiKey,
-                // IMPORTANT: Must be application/xml for .rbxlx (XML text) files.
-                // Using application/octet-stream here causes "Invalid Content stream" 400 errors.
-                "Content-Type":   "application/xml",
-                "Content-Length": String(bodyBuffer.length),
+                "x-api-key":    apiKey,
+                "Content-Type": "application/xml",
+                // ✅ No manual Content-Length — node-fetch sets it correctly from Buffer
             },
             body: bodyBuffer,
         });
+
         const text = await r.text();
+        if (!r.ok) console.error(`[publish] Non-200: ${r.status}`, text);
+        else        console.log(`[publish] Success ${r.status}`, text);
+
         res.status(r.status).set("Content-Type", "application/json").send(text);
     } catch (e) {
+        console.error("[publish] fatal:", e);
         res.status(500).json({ error: "Proxy publish error: " + e.message });
     }
 });
